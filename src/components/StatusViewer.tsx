@@ -6,8 +6,9 @@ import { translations, LanguageKey } from '../i18n';
 interface StatusViewerProps {
   statuses: StatusItem[];
   initialIndex?: number;
+  currentUserId?: string;
   onClose: () => void;
-  onReact: (statusId: string, emoji: string) => void;
+  onReact: (statusId: string, emoji: string) => void | Promise<void>;
   onReply: (statusId: string, text: string) => void;
   language: LanguageKey;
 }
@@ -15,6 +16,7 @@ interface StatusViewerProps {
 export const StatusViewer: React.FC<StatusViewerProps> = ({
   statuses,
   initialIndex = 0,
+  currentUserId = 'user_me',
   onClose,
   onReact,
   onReply,
@@ -24,9 +26,11 @@ export const StatusViewer: React.FC<StatusViewerProps> = ({
   const [progress, setProgress] = useState(0);
   const [replyText, setReplyText] = useState('');
   const [showViewers, setShowViewers] = useState(false);
+  const [recentReaction, setRecentReaction] = useState<string | null>(null);
   const t = translations[language];
 
   const currentStatus = statuses[currentIndex];
+  const quickReactionEmojis = ['❤️', '👍', '🔥', '👏', '😂'];
 
   useEffect(() => {
     setProgress(0);
@@ -51,6 +55,26 @@ export const StatusViewer: React.FC<StatusViewerProps> = ({
   }, [currentIndex, statuses.length, onClose]);
 
   if (!currentStatus) return null;
+
+  const groupedReactions = currentStatus.reactions.reduce<Record<string, { count: number; reactedByMe: boolean }>>(
+    (acc, r) => {
+      if (!acc[r.emoji]) {
+        acc[r.emoji] = { count: 0, reactedByMe: false };
+      }
+      acc[r.emoji].count += 1;
+      if (r.userId === currentUserId) {
+        acc[r.emoji].reactedByMe = true;
+      }
+      return acc;
+    },
+    {}
+  );
+
+  const handleQuickReact = (emoji: string) => {
+    onReact(currentStatus.id, emoji);
+    setRecentReaction(emoji);
+    setTimeout(() => setRecentReaction(null), 1200);
+  };
 
   const handleSendReply = (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,15 +154,21 @@ export const StatusViewer: React.FC<StatusViewerProps> = ({
           </div>
         )}
 
+        {recentReaction && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-md border border-emerald-500/40 px-4 py-1.5 rounded-full text-sm font-semibold animate-bounce z-30">
+            Reacted {recentReaction}
+          </div>
+        )}
+
         {currentStatus.caption && (
-          <div className="absolute bottom-20 left-4 right-4 bg-black/60 backdrop-blur-md p-3 rounded-xl text-center text-sm font-medium">
+          <div className="absolute bottom-24 left-4 right-4 bg-black/60 backdrop-blur-md p-3 rounded-xl text-center text-sm font-medium">
             {currentStatus.caption}
           </div>
         )}
       </div>
 
-      {/* Viewers & Reactions Toggle */}
-      <div className="absolute bottom-16 left-4 z-20 flex items-center gap-2">
+      {/* Viewers & Reactions Bar */}
+      <div className="absolute bottom-20 left-4 right-4 z-20 flex items-center justify-between gap-2">
         <button
           onClick={() => setShowViewers(!showViewers)}
           className="bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full text-xs flex items-center gap-1.5 hover:bg-black/70 transition"
@@ -146,35 +176,63 @@ export const StatusViewer: React.FC<StatusViewerProps> = ({
           <Eye className="w-4 h-4 text-emerald-400" />
           <span>{currentStatus.viewers.length} views</span>
         </button>
+
+        {Object.keys(groupedReactions).length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {Object.entries(groupedReactions).map(([emoji, info]) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => handleQuickReact(emoji)}
+                className={`px-2.5 py-1 rounded-full text-xs flex items-center gap-1 backdrop-blur-md border transition ${
+                  info.reactedByMe
+                    ? 'bg-emerald-600/40 border-emerald-400 text-white'
+                    : 'bg-black/50 border-white/20 text-slate-200 hover:bg-black/70'
+                }`}
+              >
+                <span>{emoji}</span>
+                <span className="font-mono text-[11px]">{info.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Bottom Reply Bar */}
-      <form onSubmit={handleSendReply} className="p-4 bg-black/80 backdrop-blur-md flex items-center gap-3 z-20">
+      {/* Bottom Reply & Quick Reactions Bar */}
+      <form onSubmit={handleSendReply} className="p-4 bg-black/80 backdrop-blur-md flex items-center gap-2 z-20">
         <input
           type="text"
           value={replyText}
           onChange={(e) => setReplyText(e.target.value)}
           placeholder={`Reply to ${currentStatus.userName}...`}
-          className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-3 text-white text-sm focus:outline-none focus:border-emerald-500 transition"
+          className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-full px-4 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 transition"
         />
-        <div className="flex items-center gap-2">
-          {['❤️', '🔥', '👏', '😂'].map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => onReact(currentStatus.id, emoji)}
-              className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-lg transition transform hover:scale-110"
-            >
-              {emoji}
-            </button>
-          ))}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {quickReactionEmojis.map((emoji) => {
+            const active = groupedReactions[emoji]?.reactedByMe;
+            return (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => handleQuickReact(emoji)}
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-base transition transform hover:scale-110 ${
+                  active
+                    ? 'bg-emerald-600 ring-2 ring-emerald-400'
+                    : 'bg-slate-800 hover:bg-slate-700'
+                }`}
+                title={`React with ${emoji}`}
+              >
+                {emoji}
+              </button>
+            );
+          })}
         </div>
         <button
           type="submit"
           disabled={!replyText.trim()}
-          className="p-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-full transition"
+          className="p-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-full transition shrink-0"
         >
-          <Send className="w-5 h-5" />
+          <Send className="w-4 h-4" />
         </button>
       </form>
 

@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "Status": {
+      "title": "Status",
+      "description": "Ephemeral 24-hour user status update with quick emoji reactions.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique status document identifier",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the user who created the status",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userName": {
+          "type": "string",
+          "description": "Display name of the status author",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "userAvatar": {
+          "type": "string",
+          "description": "Avatar URL of the status author",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "type": {
+          "type": "string",
+          "description": "Status media type",
+          "enum": ["text", "image", "video"]
+        },
+        "content": {
+          "type": "string",
+          "description": "Status text body or media URL",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "caption": {
+          "type": "string",
+          "description": "Optional caption for image or video status",
+          "maxLength": 300
+        },
+        "backgroundColor": {
+          "type": "string",
+          "description": "Optional hex color for text statuses",
+          "maxLength": 20
+        },
+        "musicTitle": {
+          "type": "string",
+          "description": "Optional soundtrack title attached to the status",
+          "maxLength": 100
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Visibility scope of the status",
+          "enum": ["everyone", "private"]
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Client display epoch milliseconds"
+        },
+        "expiresAt": {
+          "type": "number",
+          "description": "Expiration epoch milliseconds (24h after creation)"
+        },
+        "reactions": {
+          "type": "array",
+          "description": "Bounded list of quick emoji reactions on the status"
+        },
+        "viewers": {
+          "type": "array",
+          "description": "Bounded list of status viewer entries"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "userName",
+        "userAvatar",
+        "type",
+        "content",
+        "visibility",
+        "timestamp",
+        "expiresAt",
+        "reactions",
+        "viewers",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/statuses/{statusId}": {
+      "schema": {
+        "$ref": "#/entities/Status"
+      },
+      "description": "Stores user status updates and their quick emoji reactions."
+    }
+  }
+}

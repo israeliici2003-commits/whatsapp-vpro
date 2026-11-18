@@ -6,6 +6,9 @@ import { translations, LanguageKey } from '../../i18n';
 interface StatusTabProps {
   statuses: StatusItem[];
   userProfile: UserProfile;
+  firebaseUserEmail?: string | null;
+  onSignInGoogle?: () => void;
+  onSignOutGoogle?: () => void;
   onOpenStatus: (index: number) => void;
   onCreateStatus: (content: string, type: 'text' | 'image', caption?: string, bgColor?: string, musicTitle?: string) => void;
   language: LanguageKey;
@@ -14,6 +17,9 @@ interface StatusTabProps {
 export const StatusTab: React.FC<StatusTabProps> = ({
   statuses,
   userProfile,
+  firebaseUserEmail,
+  onSignInGoogle,
+  onSignOutGoogle,
   onOpenStatus,
   onCreateStatus,
   language
@@ -57,6 +63,39 @@ export const StatusTab: React.FC<StatusTabProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-[#111b21] text-white select-none overflow-y-auto p-4 space-y-6">
+      {/* Firestore Cloud Sync Banner */}
+      {(onSignInGoogle || firebaseUserEmail) && (
+        <div className="bg-[#202c33] border border-slate-700/60 px-4 py-2.5 rounded-2xl flex items-center justify-between gap-2 text-xs">
+          {firebaseUserEmail ? (
+            <>
+              <span className="text-emerald-400 truncate">
+                Cloud Synced: <span className="font-mono text-slate-200">{firebaseUserEmail}</span>
+              </span>
+              {onSignOutGoogle && (
+                <button
+                  onClick={onSignOutGoogle}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 shrink-0 transition"
+                >
+                  Disconnect
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="text-slate-300 truncate">Sign in with Google to sync statuses to Firestore</span>
+              {onSignInGoogle && (
+                <button
+                  onClick={onSignInGoogle}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shrink-0 transition"
+                >
+                  Connect Google
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* My Status Card */}
       <div
         onClick={() => setShowCreateModal(true)}
@@ -113,9 +152,16 @@ export const StatusTab: React.FC<StatusTabProps> = ({
                 </div>
               </div>
 
-              <div className="text-xs text-slate-400 flex items-center gap-1">
-                <Eye className="w-4 h-4 text-emerald-400" />
-                <span>{status.viewers.length}</span>
+              <div className="text-xs text-slate-400 flex items-center gap-2.5">
+                {status.reactions.length > 0 && (
+                  <span className="bg-emerald-500/15 text-emerald-300 px-2 py-0.5 rounded-full text-[11px]">
+                    {status.reactions[status.reactions.length - 1].emoji} {status.reactions.length}
+                  </span>
+                )}
+                <span className="flex items-center gap-1">
+                  <Eye className="w-4 h-4 text-emerald-400" />
+                  <span>{status.viewers.length}</span>
+                </span>
               </div>
             </div>
           ))}

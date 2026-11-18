@@ -7,9 +7,17 @@ import {
 import {
   Chat, Message, StatusItem, CallRecord, Contact, UserProfile, AppSettings, NetworkMode
 } from './types';
+import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
 import { translations } from './i18n';
 import { currentUser, initialChats, initialMessages, initialStatuses, initialCalls, initialContacts } from './data/mockData';
 import { encryptionService } from './services/encryptionService';
+import { auth, googleProvider } from './firebase';
+import {
+  createStatusInFirestore,
+  sanitizeReactions,
+  subscribeToStatuses,
+  updateStatusReactionsInFirestore,
+} from './services/statusFirestoreService';
 
 import { LockScreen } from './components/LockScreen';
 import { AuthScreen } from './components/AuthScreen';
@@ -71,6 +79,9 @@ export default function App() {
   );
   const replyTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
   const t = translations[settings.language];
   const resolvedTheme: 'light' | 'dark' =
     settings.theme === 'system'
@@ -83,14 +94,49 @@ export default function App() {
     encryptionService.initializeUser('user_me').catch((err) => {
       console.warn('Signal E2EE init warning:', err);
     });
+
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setAuthReady(true);
+    });
+
     const timer = setInterval(() => {
       setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     }, 30000);
     return () => {
+      unsubAuth();
       clearInterval(timer);
       replyTimersRef.current.forEach(clearTimeout);
     };
   }, []);
+
+  useEffect(() => {
+    if (!authReady || !firebaseUser) return;
+    const unsubscribe = subscribeToStatuses((remoteStatuses) => {
+      setStatuses((prevLocal) => {
+        const remoteIds = new Set(remoteStatuses.map((s) => s.id));
+        const localOnly = prevLocal.filter((s) => !remoteIds.has(s.id));
+        return [...remoteStatuses, ...localOnly].sort((a, b) => b.timestamp - a.timestamp);
+      });
+    });
+    return () => unsubscribe();
+  }, [authReady, firebaseUser]);
+
+  const handleSignInGoogle = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      console.warn('Google sign-in cancelled or failed:', err);
+    }
+  };
+
+  const handleSignOutGoogle = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.warn('Google sign-out warning:', err);
+    }
+  };
 
   const openChat = (chat: Chat) => {
     const clearedChat = { ...chat, unreadCount: 0 };
@@ -277,7 +323,7 @@ export default function App() {
     setActiveTab('chats');
   };
 
-  const handleCreateStatus = (
+  const handleCreateStatus = async (
     content: string,
     type: 'text' | 'image',
     caption?: string,
@@ -286,7 +332,7 @@ export default function App() {
   ) => {
     const newStatus: StatusItem = {
       id: `status_${Date.now()}`,
-      userId: 'user_me',
+      userId: firebaseUser?.uid || 'user_me',
       userName: userProfile.name,
       userAvatar: userProfile.avatar,
       type,
@@ -300,6 +346,33 @@ export default function App() {
       reactions: [],
     };
     setStatuses((prev) => [newStatus, ...prev]);
+
+    if (firebaseUser) {
+      await createStatusInFirestore(newStatus);
+    }
+  };
+
+  const handleReactStatus = async (statusId: string, emoji: string) => {
+    const actorId = firebaseUser?.uid || 'user_me';
+    const target = statuses.find((s) => s.id === statusId);
+    if (!target) return;
+
+    const alreadyReacted = target.reactions.some(
+      (r) => r.emoji === emoji && r.userId === actorId
+    );
+    const updatedReactions = sanitizeReactions(
+      alreadyReacted
+        ? target.reactions.filter((r) => !(r.emoji === emoji && r.userId === actorId))
+        : [...target.reactions, { emoji, userId: actorId }]
+    );
+
+    setStatuses((prev) =>
+      prev.map((s) => (s.id === statusId ? { ...s, reactions: updatedReactions } : s))
+    );
+
+    if (firebaseUser) {
+      await updateStatusReactionsInFirestore(statusId, updatedReactions);
+    }
   };
 
   const handleEndCall = (duration: number) => {
@@ -487,6 +560,9 @@ export default function App() {
                 <StatusTab
                   statuses={statuses}
                   userProfile={userProfile}
+                  firebaseUserEmail={firebaseUser?.email}
+                  onSignInGoogle={handleSignInGoogle}
+                  onSignOutGoogle={handleSignOutGoogle}
                   onOpenStatus={(idx) => setActiveStatusIndex(idx)}
                   onCreateStatus={handleCreateStatus}
                   language={settings.language}
@@ -588,12 +664,9 @@ export default function App() {
           <StatusViewer
             statuses={statuses}
             initialIndex={activeStatusIndex}
+            currentUserId={firebaseUser?.uid || 'user_me'}
             onClose={() => setActiveStatusIndex(null)}
-            onReact={(id, emoji) => {
-              setStatuses((p) =>
-                p.map((s) => (s.id === id ? { ...s, reactions: [...s.reactions, { emoji, userId: 'user_me' }] } : s))
-              );
-            }}
+            onReact={handleReactStatus}
             onReply={async (id, text) => {
               setActiveStatusIndex(null);
               const status = statuses.find((s) => s.id === id);

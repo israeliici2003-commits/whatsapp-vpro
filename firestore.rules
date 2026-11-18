@@ -1,0 +1,161 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidReactionList(reactions) {
+      return reactions is list
+        && reactions.size() <= 100
+        && (
+          reactions.size() == 0
+          || (
+            reactions[0] is map
+            && reactions[0].keys().hasAll(['emoji', 'userId'])
+            && reactions[0].keys().hasOnly(['emoji', 'userId'])
+            && reactions[0].emoji is string
+            && reactions[0].emoji.size() >= 1
+            && reactions[0].emoji.size() <= 16
+            && reactions[0].userId is string
+            && reactions[0].userId.size() >= 1
+            && reactions[0].userId.size() <= 128
+          )
+        );
+    }
+
+    function isValidViewerList(viewers) {
+      return viewers is list
+        && viewers.size() <= 100
+        && (
+          viewers.size() == 0
+          || (
+            viewers[0] is map
+            && viewers[0].keys().hasAll(['userId', 'userName', 'timestamp'])
+            && viewers[0].keys().hasOnly(['userId', 'userName', 'timestamp'])
+            && viewers[0].userId is string
+            && viewers[0].userId.size() >= 1
+            && viewers[0].userId.size() <= 128
+            && viewers[0].userName is string
+            && viewers[0].userName.size() >= 1
+            && viewers[0].userName.size() <= 80
+            && viewers[0].timestamp is number
+          )
+        );
+    }
+
+    function isValidStatus(data) {
+      return data.keys().hasAll([
+          'id',
+          'userId',
+          'userName',
+          'userAvatar',
+          'type',
+          'content',
+          'visibility',
+          'timestamp',
+          'expiresAt',
+          'reactions',
+          'viewers',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'userId',
+          'userName',
+          'userAvatar',
+          'type',
+          'content',
+          'caption',
+          'backgroundColor',
+          'musicTitle',
+          'visibility',
+          'timestamp',
+          'expiresAt',
+          'reactions',
+          'viewers',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.userId)
+        && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 80
+        && data.userAvatar is string && data.userAvatar.size() >= 1 && data.userAvatar.size() <= 500
+        && data.type in ['text', 'image', 'video']
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 2000
+        && (!('caption' in data) || (data.caption is string && data.caption.size() <= 300))
+        && (!('backgroundColor' in data) || (data.backgroundColor is string && data.backgroundColor.size() <= 20))
+        && (!('musicTitle' in data) || (data.musicTitle is string && data.musicTitle.size() <= 100))
+        && data.visibility in ['everyone', 'private']
+        && data.timestamp is number
+        && data.expiresAt is number
+        && isValidReactionList(data.reactions)
+        && isValidViewerList(data.viewers)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /statuses/{statusId} {
+      allow get: if isVerifiedUser()
+        && isValidId(statusId)
+        && (existing().userId == request.auth.uid || existing().visibility == 'everyone');
+
+      allow list: if isVerifiedUser()
+        && (resource.data.userId == request.auth.uid || resource.data.visibility == 'everyone');
+
+      allow create: if isVerifiedUser()
+        && isValidId(statusId)
+        && isValidStatus(incoming())
+        && incoming().id == statusId
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(statusId)
+        && isValidStatus(incoming())
+        && incoming().id == existing().id
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Owner updates status details
+          (existing().userId == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'caption', 'visibility', 'reactions', 'viewers', 'updatedAt']))
+          // Action 2: Verified peer sends or toggles a quick reaction
+          || (existing().visibility == 'everyone'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'updatedAt']))
+          // Action 3: Verified peer records status view
+          || (existing().visibility == 'everyone'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['viewers', 'updatedAt']))
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(statusId)
+        && existing().userId == request.auth.uid;
+    }
+  }
+}
